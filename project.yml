@@ -1,0 +1,51 @@
+name: SoloLevelingDaily
+options:
+  bundleIdPrefix: cloud.facets.shiv
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  SoloLevelingDaily:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources/Assets.xcassets
+        optional: true
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Solo Leveling Daily
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "14.0"
+        LSUIElement: false
+        NSHumanReadableCopyright: ""
+        NSCalendarsUsageDescription: "Used to surface scheduled encounters alongside today's quests."
+        NSCalendarsFullAccessUsageDescription: "Used to surface scheduled encounters alongside today's quests."
+        NSUserNotificationsUsageDescription: "The System dispatches quest alerts."
+    entitlements:
+      path: Resources/SoloLevelingDaily.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.personal-information.calendars: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.facets.shiv.SoloLevelingDaily
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Resources/SoloLevelingDaily.entitlements
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_PREVIEWS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
