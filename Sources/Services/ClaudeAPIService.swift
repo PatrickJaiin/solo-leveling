@@ -68,6 +68,126 @@ final class ClaudeAPIService: QuestGenerator {
         return try Self.parseToolUse(from: data)
     }
 
+    func scoreQuest(title: String, detail: String, hunter: Hunter) async throws -> QuestTemplate {
+        guard let key = Keychain.loadAPIKey(for: .anthropic), !key.isEmpty else {
+            throw ClaudeAPIError.missingAPIKey
+        }
+        var req = URLRequest(url: Self.endpoint)
+        req.httpMethod = "POST"
+        req.timeoutInterval = Self.timeoutSeconds
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue(key, forHTTPHeaderField: "x-api-key")
+        req.setValue(Self.anthropicVersion, forHTTPHeaderField: "anthropic-version")
+
+        let user = """
+        \(hunter.baselineMarkdown)
+
+        The Hunter has manually proposed this quest:
+          title: \(title)
+          detail: \(detail.isEmpty ? "(none provided)" : detail)
+
+        Score this single quest for them, using their baseline to weight baseXP fairly.
+        Call the `score_quest` tool once.
+        """
+
+        let scoreTool: [String: Any] = [
+            "name": "score_quest",
+            "description": "Score a single user-proposed quest with pillar/difficulty/baseXP/statReward.",
+            "input_schema": [
+                "type": "object",
+                "properties": [
+                    "title": ["type": "string"],
+                    "detail": ["type": "string"],
+                    "pillar": ["type": "string", "enum": ["work", "fitness", "mental", "vitality"]],
+                    "difficulty": ["type": "string", "enum": ["easy", "normal", "hard", "extreme"]],
+                    "baseXP": ["type": "integer", "minimum": 20, "maximum": 200],
+                    "statReward": ["type": "string", "enum": ["str", "agi", "int", "sen", "vit"]],
+                    "autoCompletable": ["type": "boolean"]
+                ],
+                "required": ["title", "pillar", "difficulty", "baseXP", "statReward"]
+            ]
+        ]
+
+        let body: [String: Any] = [
+            "model": Self.model,
+            "max_tokens": 600,
+            "system": Self.systemPrompt,
+            "tools": [scoreTool],
+            "tool_choice": ["type": "tool", "name": "score_quest"],
+            "messages": [["role": "user", "content": user]]
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ClaudeAPIError.http(-1, "no response") }
+        if http.statusCode >= 300 {
+            throw ClaudeAPIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        return try Self.parseSingleScore(from: data)
+    }
+
+    private static func parseSingleScore(from data: Data) throws -> QuestTemplate {
+        struct Block: Decodable {
+            let type: String
+            let name: String?
+            let input: DTO?
+        }
+        struct DTO: Decodable {
+            let title: String
+            let detail: String?
+            let pillar: String
+            let difficulty: String?
+            let baseXP: Int?
+            let statReward: String?
+            let autoCompletable: Bool?
+        }
+        struct Resp: Decodable {
+            let stop_reason: String?
+            let content: [Block]
+        }
+
+        let resp = try JSONDecoder().decode(Resp.self, from: data)
+        guard let dto = resp.content.first(where: { $0.type == "tool_use" && $0.name == "score_quest" })?.input else {
+            throw ClaudeAPIError.noToolUse
+        }
+        let pillar = Pillar(rawValue: dto.pillar.lowercased()) ?? .work
+        let diff = Difficulty(rawValue: dto.difficulty?.lowercased() ?? "normal") ?? .normal
+        let stat = StatKey(rawValue: dto.statReward?.lowercased() ?? "") ?? pillar.primaryStat
+        return QuestTemplate(
+            title: dto.title,
+            detail: dto.detail ?? "",
+            pillar: pillar,
+            difficulty: diff,
+            baseXP: dto.baseXP ?? 50,
+            statReward: stat,
+            autoCompletable: dto.autoCompletable ?? false
+        )
+    }
+
+    func ping() async throws -> String {
+        guard let key = Keychain.loadAPIKey(for: .anthropic), !key.isEmpty else {
+            throw ClaudeAPIError.missingAPIKey
+        }
+        var req = URLRequest(url: Self.endpoint)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 15
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue(key, forHTTPHeaderField: "x-api-key")
+        req.setValue(Self.anthropicVersion, forHTTPHeaderField: "anthropic-version")
+        let body: [String: Any] = [
+            "model": Self.model,
+            "max_tokens": 10,
+            "messages": [["role": "user", "content": "Reply with the single word: OK"]]
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ClaudeAPIError.http(-1, "no response") }
+        if http.statusCode >= 300 {
+            throw ClaudeAPIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        return "ok"
+    }
+
     // MARK: - Tool schema
 
     private static let questTool: [String: Any] = [
@@ -112,22 +232,33 @@ final class ClaudeAPIService: QuestGenerator {
       - Phrased in the System's voice — imperative, terse, slightly ominous, no fluff.
       - Spread across all four pillars unless instructed otherwise.
 
-    Lower-stat pillars deserve slightly harder quests — the System forces growth where the Hunter
-    is weakest. Set autoCompletable=true ONLY for quests HealthKit can verify (step count,
-    workout minutes, sleep hours).
+    ## XP weighting — the balanced playing field
+
+    Set `baseXP` based on TWO factors:
+      1. Objective task difficulty (small / medium / large / heroic effort).
+      2. PERSONAL difficulty for THIS Hunter, derived from their profile.
+
+    Examples of personal weighting:
+      - "Run 5km" is ~30 XP for an athletic 25-year-old, ~90 XP for a sedentary 50-year-old.
+      - "Send 5 cold outreach emails" is ~30 XP for a senior staff engineer with strong network,
+        ~80 XP for a fresh grad with no network — same task, very different friction.
+      - "Read a research paper" is ~40 XP for a PhD, ~80 XP for someone without a college degree.
+
+    The point is fairness across baselines — a Hunter with privilege gets less XP for tasks
+    that come easy; a Hunter starting further back gets more XP for the same nominal task.
+    Use the Hunter's demographics, salary band, education, network/occupation, and fitness
+    baseline to scale appropriately. baseXP range: 20..200.
+
+    Lower-stat pillars deserve slightly harder quests — the System forces growth where the
+    Hunter is weakest. Set autoCompletable=true ONLY for quests HealthKit can verify (step
+    count, workout minutes, sleep hours).
 
     Call the `issue_quests` tool exactly once with the full set.
     """
 
     private static func userPrompt(hunter: Hunter, isPenalty: Bool, isSunday: Bool, count: Int) -> String {
         """
-        Hunter profile:
-          name: \(hunter.name)
-          level: \(hunter.level)
-          rank: \(hunter.rank.displayName)
-          stats: STR \(hunter.str) / AGI \(hunter.agi) / INT \(hunter.intStat) / SEN \(hunter.sen) / VIT \(hunter.vit)
-          streak: \(hunter.dayStreak) days
-          lifetime quests completed: \(hunter.lifetimeQuestsCompleted)
+        \(hunter.baselineMarkdown)
 
         Constraints for today's quest set:
           - Total quests: \(count)
@@ -135,6 +266,8 @@ final class ClaudeAPIService: QuestGenerator {
           - Sunday review day: \(isSunday ? "yes — include at least one reflective/planning quest" : "no")
 
         Issue exactly \(count) quests via the issue_quests tool now.
+        Remember to weight baseXP using the Hunter's profile (age, fitness, salary band,
+        education, occupation) so harder-for-them tasks pay more.
         """
     }
 

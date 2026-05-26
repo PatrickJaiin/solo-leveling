@@ -1,6 +1,6 @@
 name: SoloLevelingDaily
 options:
-  bundleIdPrefix: cloud.facets.shiv
+  bundleIdPrefix: com.shiv
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
@@ -43,7 +43,7 @@ targets:
         com.apple.security.personal-information.calendars: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: cloud.facets.shiv.SoloLevelingDaily
+        PRODUCT_BUNDLE_IDENTIFIER: com.shiv.SoloLevelingDaily
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_ENTITLEMENTS: Resources/SoloLevelingDaily.entitlements
         COMBINE_HIDPI_IMAGES: YES

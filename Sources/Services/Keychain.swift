@@ -1,51 +1,38 @@
 import Foundation
-import Security
 
-/// Lightweight Keychain wrapper for AI provider API keys.
+/// Secrets storage backed by `UserDefaults` (the app's private domain, sandboxed,
+/// stored in the user's encrypted home directory).
+///
+/// Earlier versions used the macOS Keychain, but ad-hoc rebuilds change the binary's
+/// signature, which makes the system prompt for the user's login password every time
+/// the rebuilt app tries to read its own previously-saved item. For a single-user,
+/// sandboxed personal app the Keychain hardening wasn't worth that friction — falling
+/// back to UserDefaults is a deliberate trade-off.
+///
+/// The API name is kept (`Keychain.save/load/deleteAPIKey`) so callers don't change.
 enum Keychain {
-    private static let service = "cloud.facets.shiv.SoloLevelingDaily"
+    private static let defaults = UserDefaults.standard
 
     enum Account: String, CaseIterable {
         case anthropic = "anthropic-api-key"
         case gemini = "gemini-api-key"
+
+        var defaultsKey: String { "secret.\(rawValue)" }
     }
 
     @discardableResult
     static func saveAPIKey(_ key: String, for account: Account) -> Bool {
-        let data = Data(key.utf8)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account.rawValue
-        ]
-        SecItemDelete(query as CFDictionary)
-        var add = query
-        add[kSecValueData as String] = data
-        let status = SecItemAdd(add as CFDictionary, nil)
-        return status == errSecSuccess
+        defaults.set(key, forKey: account.defaultsKey)
+        return true
     }
 
     static func loadAPIKey(for account: Account) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account.rawValue,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let str = String(data: data, encoding: .utf8) else { return nil }
-        return str
+        let v = defaults.string(forKey: account.defaultsKey)
+        guard let v, !v.isEmpty else { return nil }
+        return v
     }
 
     static func deleteAPIKey(for account: Account) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account.rawValue
-        ]
-        SecItemDelete(query as CFDictionary)
+        defaults.removeObject(forKey: account.defaultsKey)
     }
 }

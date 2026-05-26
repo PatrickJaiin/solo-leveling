@@ -3,7 +3,6 @@ import SwiftUI
 struct QuestCard: View {
     let quest: Quest
     var onComplete: () -> Void
-    var onUndo: () -> Void
 
     var body: some View {
         SystemPanel(tint: cardTint, notch: 10, padding: 14) {
@@ -39,6 +38,10 @@ struct QuestCard: View {
                         Text("+1 \(quest.statReward.label)")
                             .font(Typography.systemTag)
                             .foregroundStyle(quest.pillar.tint)
+                        Spacer()
+                        Text("ISSUED \(quest.dayKey)")
+                            .font(Typography.systemTag)
+                            .foregroundStyle(Theme.dim.opacity(0.7))
                     }
                 }
             }
@@ -66,7 +69,7 @@ struct QuestCard: View {
     @ViewBuilder
     private var completeButton: some View {
         Button {
-            if quest.status == .completed { onUndo() } else { onComplete() }
+            if quest.status == .assigned { onComplete() }
         } label: {
             ZStack {
                 NotchedRectangle(notch: 6)
@@ -84,5 +87,6 @@ struct QuestCard: View {
             .glow(cardTint, radius: 4, intensity: 0.6)
         }
         .buttonStyle(.plain)
+        .disabled(quest.status != .assigned)
     }
 }

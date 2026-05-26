@@ -56,6 +56,8 @@ struct StatSheetView: View {
                     }
                 }
 
+                FragmentShelfView()
+
                 SystemPanel("Recent Log", tint: Theme.systemBlue) {
                     if logs.isEmpty {
                         Text("No history yet. Complete a few quests to start your log.")

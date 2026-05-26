@@ -78,8 +78,10 @@ final class Quest {
     }
     var statReward: StatKey { StatKey(rawValue: statRewardRaw) ?? pillar.primaryStat }
 
+    /// XP awarded before stat modifiers. Penalty no longer multiplies — penalty days carry
+    /// XP debt instead (see `QuestEngine.performDailyReset`).
     var effectiveXP: Int {
-        let mult = difficulty.xpMultiplier * (isPenalty ? 1.5 : 1.0) * (isDungeon ? 3.0 : 1.0)
+        let mult = difficulty.xpMultiplier * (isDungeon ? 3.0 : 1.0)
         return Int(Double(baseXP) * mult)
     }
 }

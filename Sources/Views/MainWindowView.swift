@@ -22,6 +22,7 @@ struct MainWindowView: View {
     @Environment(\.modelContext) private var context
     @Environment(QuestEngine.self) private var engine
     @Environment(AppSettings.self) private var settings
+    @Environment(SystemTakeoverCenter.self) private var takeovers
     let healthKit: HealthKitService
     let eventKit: EventKitService
     let notifications: NotificationService
@@ -29,6 +30,7 @@ struct MainWindowView: View {
     @Query private var hunters: [Hunter]
     @State private var tab: MainTab = .quests
     @State private var showingLevelUp: Bool = false
+    @State private var showingStatusWindow: Bool = false
     @State private var initializing: Bool = false
 
     var body: some View {
@@ -51,9 +53,24 @@ struct MainWindowView: View {
                 LevelUpModal(result: result) {
                     showingLevelUp = false
                     engine.lastLevelUp = nil
+                    if let hunter = hunters.first, hunter.unspentPoints > 0 {
+                        showingStatusWindow = true
+                    }
                 }
                 .transition(.opacity.combined(with: .scale))
                 .zIndex(10)
+            }
+
+            if showingStatusWindow, let hunter = hunters.first {
+                StatusWindowView(hunter: hunter) { showingStatusWindow = false }
+                    .transition(.opacity.combined(with: .scale))
+                    .zIndex(11)
+            }
+
+            if let msg = takeovers.current {
+                SystemTakeoverView(message: msg) { takeovers.dismissCurrent() }
+                    .transition(.opacity)
+                    .zIndex(20)
             }
         }
         .onChange(of: engine.lastLevelUp?.id) { _, new in
@@ -98,7 +115,10 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private func detail(for hunter: Hunter) -> some View {
-        Group {
+        VStack(spacing: 0) {
+            HunterBanner(hunter: hunter, onOpenStatus: { showingStatusWindow = true })
+                .padding([.top, .horizontal], 20)
+                .padding(.bottom, 12)
             switch tab {
             case .quests:
                 QuestBoardView(hunter: hunter, eventKit: eventKit, healthKit: healthKit)
@@ -109,12 +129,6 @@ struct MainWindowView: View {
             case .settings:
                 SettingsView(hunter: hunter, healthKit: healthKit, eventKit: eventKit, notifications: notifications)
             }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HunterBanner(hunter: hunter)
-                .padding([.top, .horizontal], 20)
-                .padding(.bottom, 12)
-                .background(Theme.bg.opacity(0.85).blur(radius: 0.1))
         }
         .frame(minWidth: 720, minHeight: 600)
     }

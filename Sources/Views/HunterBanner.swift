@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HunterBanner: View {
     let hunter: Hunter
+    var onOpenStatus: (() -> Void)? = nil
 
     var xpToNext: Int { RankSystem.xpToNext(level: hunter.level) }
 
@@ -32,6 +33,27 @@ struct HunterBanner: View {
                         Text("\(hunter.xp) / \(xpToNext)")
                             .font(Typography.body)
                             .foregroundStyle(Theme.systemCyan)
+                    }
+                    if hunter.xpDebt > 0 {
+                        HStack(spacing: 6) {
+                            Text("DEBT").font(Typography.systemTag).foregroundStyle(Theme.danger)
+                            SystemBar(progress: 1.0, tint: Theme.danger, height: 5).frame(maxWidth: 380)
+                            Text("-\(hunter.xpDebt)").font(Typography.body).foregroundStyle(Theme.danger)
+                        }
+                    }
+                    if hunter.unspentPoints > 0, let onOpenStatus {
+                        Button {
+                            onOpenStatus()
+                        } label: {
+                            Text("[ ALLOCATE \(hunter.unspentPoints) PTS → STATUS WINDOW ]")
+                                .font(Typography.systemTag).foregroundStyle(Theme.systemGold)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(NotchedRectangle(notch: 4).fill(Theme.systemGold.opacity(0.1)))
+                                .overlay(NotchedRectangle(notch: 4).stroke(Theme.systemGold, lineWidth: 1))
+                                .contentShape(NotchedRectangle(notch: 4))
+                        }
+                        .buttonStyle(.plain)
+                        .glow(Theme.systemGold, radius: 4, intensity: 0.4)
                     }
                     HStack(spacing: 14) {
                         statChip(.str, hunter.str)

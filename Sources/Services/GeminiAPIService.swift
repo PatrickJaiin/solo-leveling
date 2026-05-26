@@ -73,6 +73,71 @@ final class GeminiAPIService: QuestGenerator {
         return try Self.parse(data)
     }
 
+    func scoreQuest(title: String, detail: String, hunter: Hunter) async throws -> QuestTemplate {
+        guard let key = Keychain.loadAPIKey(for: .gemini), !key.isEmpty else {
+            throw GeminiAPIError.missingAPIKey
+        }
+        var req = URLRequest(url: Self.endpoint)
+        req.httpMethod = "POST"
+        req.timeoutInterval = Self.timeoutSeconds
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+
+        let user = """
+        \(hunter.baselineMarkdown)
+
+        The Hunter has manually proposed this quest:
+          title: \(title)
+          detail: \(detail.isEmpty ? "(none provided)" : detail)
+
+        Score this single quest, using the Hunter's baseline to weight baseXP fairly.
+        Return ONE quest object (matching the schema, just one element in the array).
+        """
+
+        let body: [String: Any] = [
+            "systemInstruction": ["parts": [["text": Self.systemPrompt]]],
+            "contents": [["role": "user", "parts": [["text": user]]]],
+            "generationConfig": [
+                "responseMimeType": "application/json",
+                "responseSchema": Self.responseSchema,
+                "temperature": 0.4,
+                "maxOutputTokens": 600
+            ]
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw GeminiAPIError.http(-1, "no response") }
+        if http.statusCode >= 300 {
+            throw GeminiAPIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        let parsed = try Self.parse(data)
+        guard let first = parsed.first else { throw GeminiAPIError.empty }
+        return first
+    }
+
+    func ping() async throws -> String {
+        guard let key = Keychain.loadAPIKey(for: .gemini), !key.isEmpty else {
+            throw GeminiAPIError.missingAPIKey
+        }
+        var req = URLRequest(url: Self.endpoint)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 15
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        req.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        let body: [String: Any] = [
+            "contents": [["role": "user", "parts": [["text": "Reply with the single word: OK"]]]],
+            "generationConfig": ["maxOutputTokens": 10]
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw GeminiAPIError.http(-1, "no response") }
+        if http.statusCode >= 300 {
+            throw GeminiAPIError.http(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        return "ok"
+    }
+
     // MARK: - Schema
 
     /// `responseSchema` is Gemini's subset of OpenAPI 3.0 schema. `enum` is a top-level
@@ -115,22 +180,29 @@ final class GeminiAPIService: QuestGenerator {
       - In the System's voice: imperative, terse, slightly ominous, no fluff.
       - Spread across all four pillars unless told otherwise.
 
-    Lower-stat pillars get slightly harder quests — the System forces growth where the Hunter
-    is weakest. Set autoCompletable=true ONLY for quests HealthKit can verify (steps, workout
-    minutes, sleep hours).
+    ## XP weighting — balanced playing field
+    Set baseXP based on TWO factors:
+      1. Objective task difficulty.
+      2. Personal difficulty for THIS Hunter, from their profile.
+
+    Examples:
+      - "Run 5km" → ~30 XP for an athletic 25yo, ~90 XP for a sedentary 50yo.
+      - "Send 5 cold emails" → ~30 XP for a senior with a strong network, ~80 XP for a fresh
+        grad with no network.
+      - "Read a research paper" → ~40 XP for a PhD, ~80 XP for someone without a degree.
+
+    Use age, fitness baseline, salary band, education, and occupation to scale XP fairly.
+    Range: 20..200.
+
+    Lower-stat pillars get slightly harder quests. Set autoCompletable=true ONLY for steps,
+    workout minutes, or sleep hours.
 
     Respond with a JSON object matching the schema. No prose, no preamble.
     """
 
     private static func userPrompt(hunter: Hunter, isPenalty: Bool, isSunday: Bool, count: Int) -> String {
         """
-        Hunter profile:
-          name: \(hunter.name)
-          level: \(hunter.level)
-          rank: \(hunter.rank.displayName)
-          stats: STR \(hunter.str) / AGI \(hunter.agi) / INT \(hunter.intStat) / SEN \(hunter.sen) / VIT \(hunter.vit)
-          streak: \(hunter.dayStreak) days
-          lifetime quests completed: \(hunter.lifetimeQuestsCompleted)
+        \(hunter.baselineMarkdown)
 
         Constraints for today's quest set:
           - Total quests: \(count)
@@ -138,6 +210,7 @@ final class GeminiAPIService: QuestGenerator {
           - Sunday review day: \(isSunday ? "yes — include at least one reflective/planning quest" : "no")
 
         Issue exactly \(count) quests now.
+        Remember to weight baseXP using the Hunter's profile.
         """
     }
 

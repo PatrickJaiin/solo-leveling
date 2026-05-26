@@ -38,4 +38,12 @@ protocol QuestGenerator {
                               isPenalty: Bool,
                               isSunday: Bool,
                               count: Int) async throws -> [QuestTemplate]
+
+    /// Score a user-supplied quest title against the Hunter's baseline.
+    /// AI fills in pillar / difficulty / baseXP / statReward / detail using the
+    /// Hunter's demographics to weight XP fairly.
+    func scoreQuest(title: String, detail: String, hunter: Hunter) async throws -> QuestTemplate
+
+    /// Minimal API call to verify the API key + network works. Throws on failure.
+    func ping() async throws -> String
 }
